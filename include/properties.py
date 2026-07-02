@@ -78,7 +78,10 @@ def calculate_properties(smiles_list: list[str]) -> list[dict]:
     if not smiles_list:
         raise ValueError("Smiles list is empty — nothing to calculate.")
 
-    logger.info("Calculating properties for %d molecules.", len(smiles_list))
+    logger.info(
+        "Calculating properties for %d molecules.",
+        len(smiles_list)
+    )
 
     results: list[dict] = []
     failed = 0
@@ -87,7 +90,10 @@ def calculate_properties(smiles_list: list[str]) -> list[dict]:
         mol = Chem.MolFromSmiles(smi)
 
         if mol is None:
-            logger.warning("Invalid SMILES (could not parse): '%s' — skipping.", smi)
+            logger.warning(
+                "Invalid SMILES (could not parse): '%s' — skipping.",
+                smi
+            )
             failed += 1
             continue
 
@@ -104,7 +110,10 @@ def calculate_properties(smiles_list: list[str]) -> list[dict]:
             results.append(props)
 
         except Exception as e:
-            logger.error("Failed to calculate properties for '%s': %s", smi, e)
+            logger.error(
+                "Failed to calculate properties for '%s': %s",
+                smi, e
+            )
             failed += 1
 
     logger.info("Properties calculation complete.")
@@ -112,23 +121,3 @@ def calculate_properties(smiles_list: list[str]) -> list[dict]:
     logger.info("  Failed     : %d", failed)
 
     return results
-
-
-if __name__ == "__main__":
-    test_molecules = [
-        "CC(=O)Nc1ccc(C(=O)O)cc1",
-        "CC(=O)Nc1ccc(C(N)=O)cc1",
-        "CC(=O)Nc1ccc(CN)cc1",
-        "COC1CCNCC1",
-        "COc1ccc(NC(C)=O)cc1",
-        "COc1ccccc1",
-        "NC(=O)C1CCNCC1",
-        "NC(=O)c1ccccc1",
-        "NCC1CCNCC1",
-        "NCc1ccccc1",
-        "O=C(O)C1CCNCC1",
-        "O=C(O)c1ccccc1",
-        "INVALID_SMILES",
-    ]
-
-    results = calculate_properties(test_molecules)

@@ -74,7 +74,10 @@ def cluster_molecules(
         mol = Chem.MolFromSmiles(smi)
 
         if mol is None:
-            logger.warning("Invalid SMILES (could not parse): '%s' — skipping.", smi)
+            logger.warning(
+                "Invalid SMILES (could not parse): '%s' — skipping.",
+                smi
+            )
             failed += 1
             continue
 
@@ -83,7 +86,10 @@ def cluster_molecules(
             valid_smiles.append(smi)
             fingerprints.append(fp)
         except Exception as e:
-            logger.error("Failed to generate fingerprint for '%s': %s", smi, e)
+            logger.error(
+                "Failed to generate fingerprint for '%s': %s",
+                smi, e
+            )
             failed += 1
 
     if not valid_smiles:
@@ -113,28 +119,3 @@ def cluster_molecules(
     logger.info("  Failed    : %d", failed)
 
     return results
-
-
-if __name__ == "__main__":
-    test_molecules = [
-        "CC(=O)Nc1ccc(C(=O)O)cc1",
-        "CC(=O)Nc1ccc(C(N)=O)cc1",
-        "CC(=O)Nc1ccc(CN)cc1",
-        "COC1CCNCC1",
-        "COc1ccc(NC(C)=O)cc1",
-        "COc1ccccc1",
-        "NC(=O)C1CCNCC1",
-        "NC(=O)c1ccccc1",
-        "NCC1CCNCC1",
-        "NCc1ccccc1",
-        "O=C(O)C1CCNCC1",
-        "O=C(O)c1ccccc1",
-        "INVALID_SMILES",
-    ]
-
-    results = cluster_molecules(test_molecules, num_clusters=3)
-    print(f"\n{'='*55}")
-    print(f"{'SMILES':<40} {'Cluster':>7}")
-    print(f"{'='*55}")
-    for r in sorted(results, key=lambda x: x["cluster"]):
-        print(f"{r['smiles']:<40} {r['cluster']:>7}")

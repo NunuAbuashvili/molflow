@@ -3,7 +3,7 @@ Generates molecules by combining scaffold and R-group SMILES using RDKit.
 Scaffolds and R-groups must each contain exactly one dummy atom (*)
 representing the attachment point.
 """
-
+import io
 import csv
 import logging
 import itertools
@@ -18,52 +18,10 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def load_smiles_from_csv(filepath: str) -> list[str]:
-    """
-    Read a CSV file with a 'smiles' column and return a list of SMILES strings.
-
-    Args:
-        filepath: Path to CSV file.
-
-    Returns:
-        List of raw SMILES strings (unparsed, unvalidated).
-
-    Raises:
-        FileNotFoundError: If the file does not exist.
-        ValueError: If the 'smiles' column is missing.
-    """
-    smiles_list = []
-
-    try:
-        with open(filepath, mode='r') as f:
-            reader = csv.DictReader(f)
-
-            if "smiles" not in (reader.fieldnames or []):
-                raise ValueError(
-                    f"'smiles' column not found in {filepath}. "
-                    f"Found columns: {reader.fieldnames}"
-                )
-
-            for line_num, row in enumerate(reader, start=2):  # start=2 because row 1 is header
-                smi = row["smiles"].strip()
-
-                if not smi:
-                    logger.warning(
-                        "Line %d in %s is empty — skipping.",
-                        line_num,
-                        filepath
-                    )
-                    continue
-
-                smiles_list.append(smi)
-
-            logger.info("Loaded %d SMILES from '%s'.", len(smiles_list), filepath)
-            return smiles_list
-    except FileNotFoundError:
-        raise FileNotFoundError(f"File not found: {filepath}")
-
-
-def validate_smiles(smiles_list: list[str], source_label: str) -> list[Chem.Mol]:
+def validate_smiles(
+    smiles_list: list[str],
+    source_label: str
+) -> list[Chem.Mol]:
     """
     Convert a list of SMILES strings to RDKit Mol objects, skipping invalid ones.
 
@@ -140,7 +98,10 @@ def _label_dummy_atom(mol: Chem.Mol, label: int = 1) -> Chem.Mol:
     return rw_mol.GetMol()
 
 
-def _combine_scaffold_and_rgroup(scaffold: Chem.Mol, r_group: Chem.Mol) -> str | None:
+def _combine_scaffold_and_rgroup(
+    scaffold: Chem.Mol,
+    r_group: Chem.Mol
+) -> str | None:
     """
     Combine one scaffold and one R-group into a single molecule SMILES.
 
@@ -230,16 +191,3 @@ def generate_molecules(
     logger.info("  Failed combinations: %d", failed)
 
     return sorted(generated)
-
-
-if __name__ == "__main__":
-    scaffolds = load_smiles_from_csv("ABC123_scaffolds.csv")
-    r_groups = load_smiles_from_csv("ABC123_r_groups.csv")
-
-    molecules = generate_molecules(scaffolds, r_groups)
-
-    print(f"\n{'='*50}")
-    print(f"Generated {len(molecules)} unique molecules:")
-    print(f"{'='*50}")
-    for smi in molecules:
-        print(f"  {smi}")
