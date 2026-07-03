@@ -1,0 +1,11 @@
+# --- S3 / MinIO ---
+apache-airflow-providers-amazon
+
+# --- Cheminformatics core ---
+rdkit
+pandas
+numpy
+scikit-learn
+
+# --- Notifications (step 3, MS Teams webhook) ---
+pymsteams
