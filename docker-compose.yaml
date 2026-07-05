@@ -16,6 +16,9 @@ x-airflow-common:
     AIRFLOW_CONN_MINIO_S3: >-
       {"conn_type": "aws", "login": "${MINIO_ROOT_USER}", "password": "${MINIO_ROOT_PASSWORD}",
       "extra": {"endpoint_url": "http://minio:9000"}}
+    AIRFLOW_CONN_MOLFLOW_DB: >-
+      {"conn_type": "postgres", "login": "${POSTGRES_USER}", "password": "${POSTGRES_PASSWORD}",
+      "host": "postgres", "port": 5432, "schema": "molflow"}
   volumes:
     - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
     - ${AIRFLOW_PROJ_DIR:-.}/logs:/opt/airflow/logs
@@ -39,6 +42,7 @@ services:
       POSTGRES_DB: airflow
     volumes:
       - postgres-db-volume:/var/lib/postgresql/data
+      - ./postgres/init-molflow-db.sql:/docker-entrypoint-initdb.d/init-molflow-db.sql
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "${POSTGRES_USER}"]
       interval: 10s

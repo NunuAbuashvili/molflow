@@ -1,6 +1,9 @@
 # --- S3 / MinIO ---
 apache-airflow-providers-amazon
 
+# --- Postgres (tracking table) ---
+apache-airflow-providers-postgres
+
 # --- Cheminformatics core ---
 rdkit
 pandas
