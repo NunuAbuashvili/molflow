@@ -11,4 +11,7 @@ numpy
 scikit-learn
 
 # --- Notifications (step 3, MS Teams webhook) ---
-pymsteams
+requests
+
+# --- Data quality (Step 3) ---
+pandera[pandas]

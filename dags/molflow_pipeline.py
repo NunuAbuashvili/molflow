@@ -90,10 +90,11 @@ def _merge_and_upload(
     dataset_id: str,
     properties: list[dict],
     clusters: list[dict]
-) -> tuple[str, int]:
+) -> tuple[str, list[dict]]:
     """
     Merge properties and cluster assignments by SMILES,
-    write to a CSV file, and upload it to MinIO."""
+    write to a CSV file, and upload it to MinIO.
+    """
     cluster_by_smiles = {row["smiles"]: row["cluster"] for row in clusters}
     merged = [
         {**prop_row, "cluster": cluster_by_smiles.get(prop_row["smiles"])}
@@ -123,7 +124,7 @@ def _merge_and_upload(
         replace=True,
     )
 
-    return f"{PROCESSED_BUCKET}/{key}", len(merged)
+    return f"{PROCESSED_BUCKET}/{key}", merged
 
 
 def _get_successfully_processed_dataset_ids() -> set[str]:
@@ -390,12 +391,14 @@ def molflow_pipeline():
         s3_hook = S3Hook(aws_conn_id=S3_CONN_ID)
 
         try:
-            result_path, row_count = _merge_and_upload(
+            result_path, merged = _merge_and_upload(
                 s3_hook,
                 dataset_id,
                 properties,
                 clusters
             )
+            row_count = len(merged)
+
             _record_processing_result(
                 dataset_id=dataset_id,
                 dag_run_id=dag_run_id,
@@ -409,7 +412,11 @@ def molflow_pipeline():
                 "Processed '%s' -> %s (%d molecules).",
                 dataset_id, result_path, row_count
             )
-            return result_path
+            return {
+                "dataset_id": dataset_id,
+                "result_path": result_path,
+                "merged": merged
+            }
         except Exception as e:
             error_message = f"[merge_and_upload] {e}"
             _record_processing_result(
@@ -423,6 +430,133 @@ def molflow_pipeline():
             )
             raise AirflowSkipException(error_message) from e
 
+    @task(trigger_rule="all_done")
+    def run_quality_checks(bundle: dict, **context) -> dict:
+        """
+        Validate one dataset's merged results with Pandera
+        and record the outcome.
+        """
+        from include.quality_checks import validate_results
+
+        if not bundle or "dataset_id" not in bundle:
+            raise AirflowSkipException(
+                "No bundle from merge_and_upload — its upstream was skipped or failed."
+            )
+
+        dataset_id = bundle["dataset_id"]
+        dag_run_id = context["dag_run"].run_id
+        passed, failures = validate_results(bundle["merged"])
+
+        pg_hook = PostgresHook(postgres_conn_id=POSTGRES_CONN_ID)
+        pg_hook.run(
+            """
+            INSERT INTO quality_check_runs (dataset_id, dag_run_id, passed, failed_check_count)
+            VALUES (%s, %s, %s, %s)
+            """,
+            parameters=(dataset_id, dag_run_id, passed, len(failures)),
+        )
+
+        if passed:
+            logger.info("All quality checks passed for '%s'.", dataset_id)
+        else:
+            logger.warning("Quality issues for '%s': %s", dataset_id, failures)
+
+        return {"dataset_id": dataset_id, "passed": passed}
+
+    @task(trigger_rule="all_done")
+    def notify_run_summary(_quality_results: list, **context) -> None:
+        """
+        Aggregates processed_datasets and quality_check_runs for a single
+        dag_run_id and sends one summary card.
+        """
+        from airflow.models import Variable
+
+        dag_run_id = context["dag_run"].run_id
+        pg_hook = PostgresHook(postgres_conn_id=POSTGRES_CONN_ID)
+
+        processing_rows = pg_hook.get_records(
+            """
+            SELECT dataset_id, status, error_message
+            FROM processed_datasets
+            WHERE dag_run_id = %s
+            ORDER BY dataset_id
+            """,
+            parameters=(dag_run_id,),
+        )
+
+        succeeded = [r for r in processing_rows if r[1] == "success"]
+        failed = [r for r in processing_rows if r[1] == "failed"]
+
+        quality_rows = pg_hook.get_records(
+            """
+            SELECT dataset_id, passed, failed_check_count
+            FROM quality_check_runs
+            WHERE dag_run_id = %s
+            ORDER BY dataset_id
+            """,
+            parameters=(dag_run_id,),
+        )
+        quality_passed = [r for r in quality_rows if r[1]]
+        quality_failed = [r for r in quality_rows if not r[1]]
+
+        facts = [
+            {"title": "Processed successfully", "value": str(len(succeeded))},
+            {"title": "Processing failed", "value": str(len(failed))},
+            {"title": "Quality checks passed", "value": str(len(quality_passed))},
+            {"title": "Quality checks failed", "value": str(len(quality_failed))},
+        ]
+
+        body = [
+            {
+                "type": "TextBlock",
+                "text": f"molflow run summary — {dag_run_id}",
+                "wrap": True,
+                "weight": "Bolder",
+                "size": "Medium",
+            },
+            {"type": "FactSet", "facts": facts},
+        ]
+
+        if failed:
+            failure_lines = "\n".join(f"- **{ds}**: {err}" for ds, _, err in failed)
+            body.append({
+                "type": "TextBlock",
+                "text": f"**Processing failures:**\n{failure_lines}",
+                "wrap": True,
+            })
+
+        if quality_failed:
+            quality_lines = "\n".join(
+                f"- **{ds}**: {count} check(s) failed" for ds, _, count in quality_failed
+            )
+            body.append({
+                "type": "TextBlock",
+                "text": f"**Quality issues:**\n{quality_lines}",
+                "wrap": True,
+            })
+
+        payload = {
+            "type": "message",
+            "attachments": [
+                {
+                    "contentType": "application/vnd.microsoft.card.adaptive",
+                    "content": {
+                        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+                        "type": "AdaptiveCard",
+                        "version": "1.4",
+                        "body": body,
+                    },
+                }
+            ],
+        }
+        from include.notifications import post_to_teams
+
+        post_to_teams(Variable.get("teams_webhook_secret"), payload)
+        logger.info(
+            "Run summary: %d succeeded, %d failed, %d quality-passed, %d quality-failed.",
+            len(succeeded), len(failed), len(quality_passed), len(quality_failed),
+        )
+
     new_dataset_ids = discover_new_datasets()
 
     scaffolds = fetch_scaffolds.expand(dataset_id=new_dataset_ids)
@@ -435,7 +569,9 @@ def molflow_pipeline():
     clusters_output = cluster.expand(bundle=gen_output)
 
     merge_inputs = zip_merge_inputs(props_output, clusters_output)
-    merge_and_upload.expand_kwargs(merge_inputs)
+    merge_output = merge_and_upload.expand_kwargs(merge_inputs)
+    quality_output = run_quality_checks.expand(bundle=merge_output)
+    notify_run_summary(quality_output)
 
 
 molflow_pipeline()
