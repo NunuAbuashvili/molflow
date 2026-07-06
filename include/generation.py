@@ -3,8 +3,6 @@ Generates molecules by combining scaffold and R-group SMILES using RDKit.
 Scaffolds and R-groups must each contain exactly one dummy atom (*)
 representing the attachment point.
 """
-import io
-import csv
 import logging
 import itertools
 from rdkit import Chem
